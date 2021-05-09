@@ -3,6 +3,8 @@
 import setuptools
 
 install_requires = [
+    'pandas>=1.2.4'
+    'aiohttp>=3.7.3',
     'certifi>=2020.12.5',
     'cffi>=1.14.4',
     'chardet>=3.0.4',
@@ -25,7 +27,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='aiopyupbit',
-    version='0.1.0',
+    version='0.1.1',
     author='Codejune',
     author_email='kbj9704@gmail.com',
     description='python wrapper for upbit API for asyncio and Python',

@@ -152,7 +152,8 @@ async def get_current_price(ticker="KRW-BTC"):
     """
     try:
         url = "https://api.upbit.com/v1/ticker"
-        contents = await _call_public_api(url, markets=ticker)[0]
+        contents = await _call_public_api(url, markets=ticker)
+        contents = contents[0]
         if not contents:
             return None
 
@@ -177,7 +178,8 @@ async def get_orderbook(tickers="KRW-BTC"):
     '''
     try:
         url = "https://api.upbit.com/v1/orderbook"
-        contents = await _call_public_api(url, markets=tickers)[0]
+        contents = await _call_public_api(url, markets=tickers)
+        contents = contents[0]
         return contents
     except Exception as x:
         print(x.__class__.__name__)

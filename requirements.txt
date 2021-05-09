@@ -1,3 +1,5 @@
+pandas==1.2.4
+aiohttp==3.7.3
 certifi==2020.12.5
 cffi==1.14.4
 chardet==3.0.4
