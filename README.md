@@ -33,7 +33,8 @@ About
 -----
 
 Some features are not currently implemented: 
-* raise pyupbit defined error
+* Raise pyupbit defined error(prototype applied)
+* WebSocketManager class 
 
 Issues
 ------
