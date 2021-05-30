@@ -16,7 +16,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='aiopyupbit',
-    version='0.1.7',
+    version='0.2.0',
     author='Codejune',
     author_email='kbj9704@gmail.com',
     description='python wrapper for upbit API for asyncio and Python',

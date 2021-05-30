@@ -1,5 +1,6 @@
 # !/usr/bin/python
 # -*- coding: utf-8 -*-
+import math
 import re
 import uuid
 import hashlib
@@ -7,48 +8,68 @@ import jwt
 from urllib.parse import urlencode
 if __name__ == "__main__":
     from request_api import _send_get_request, _send_post_request, _send_delete_request
-    from errors import TooManyRequests, UpbitError
 else:
     from .request_api import _send_get_request, _send_post_request, _send_delete_request
-    from .errors import TooManyRequests, UpbitError
-
-# 원화 마켓 주문 가격 단위
-# https://docs.upbit.com/docs/market-info-trade-price-detail
 
 
-def get_tick_size(price):
-    if price >= 2000000:
-        tick_size = round(price / 1000) * 1000
-    elif price >= 1000000:
-        tick_size = round(price / 500) * 500
-    elif price >= 500000:
-        tick_size = round(price / 100) * 100
-    elif price >= 100000:
-        tick_size = round(price / 50) * 50
-    elif price >= 10000:
-        tick_size = round(price / 10) * 10
-    elif price >= 1000:
-        tick_size = round(price / 5) * 5
-    elif price >= 100:
-        tick_size = round(price / 1) * 1
-    elif price >= 10:
-        tick_size = round(price / 0.1) / 10
+def get_tick_size(price: float or int,
+                  method="floor") -> float:
+    """KRW Market order price unit 
+
+    Args:
+        price (float or int): Price
+        method (str, optional): Order price calculate method. Defaults to "floor".
+
+    Returns:
+        float: Price adjusted in units of KRW market order price 
+    """
+    if method == "floor":
+        func = math.floor
+    elif method == "round":
+        func = round
     else:
-        tick_size = round(price / 0.01) / 100
-    return tick_size
+        func = math.ceil
+
+    if price >= 2000000:
+        return func(price / 1000) * 1000
+    elif price >= 1000000:
+        return func(price / 500) * 500
+    elif price >= 500000:
+        return func(price / 100) * 100
+    elif price >= 100000:
+        return func(price / 50) * 50
+    elif price >= 10000:
+        return func(price / 10) * 10
+    elif price >= 1000:
+        return func(price / 5) * 5
+    elif price >= 100:
+        return func(price / 1) * 1
+    elif price >= 10:
+        return func(price / 0.1) / 10
+    else:
+        return func(price / 0.01) / 100
 
 
 class Upbit:
-    def __init__(self, access, secret):
+    def __init__(self, access: str, secret: str):
         self.access = access
         self.secret = secret
 
-    async def _request_headers(self, query=None):
+    async def _request_headers(self, query: dict = None) -> dict:
+        """Get request header
+
+        Args:
+            query (dict, optional): Header query. Defaults to None.
+
+        Returns:
+            dict: Included authorization request header
+        """
         payload = {"access_key": self.access,
                    "nonce": str(uuid.uuid4())}
-        if query != None:
+        if query:
             m = hashlib.sha512()
-            m.update(urlencode(query).encode())
+            m.update(urlencode(query, doseq=True).replace(
+                "%5B%5D=", "[]=").encode())
             query_hash = m.hexdigest()
             payload['query_hash'] = query_hash
             payload['query_hash_alg'] = "SHA512"
@@ -56,99 +77,99 @@ class Upbit:
         jwt_token = jwt.encode(payload=payload,
                                key=self.secret,
                                algorithm="HS256")
-        authorization_token = f'Bearer {jwt_token}'
-        headers = {"Authorization": authorization_token}
-        return headers
+        return {"Authorization": f'Bearer {jwt_token}'}
 
-    async def check_authentication(self):
+    async def check_authentication(self) -> tuple or bool:
+        """Check account's access/secret key authentication
+
+        Returns:
+            tuple or bool: bool if auth_success else tuple
+        """
         url = 'https://api.upbit.com/v1/accounts'
         headers = await self._request_headers()
-        result = await _send_get_request(url, headers=headers)
-        result = result[0]
-        return (False, result['error']['message']) if 'error' in result else (True, None)
+        body, _ = await _send_get_request(url, headers=headers)
+        return (False, body['error']['message']) if 'error' in body else (True, None)
 
+    async def get_balances(self, contain_req: bool = False) -> tuple or list:
+        """Get account's all possession 
 
-    async def get_balances(self, contain_req: bool = False):
-        """
-        전체 계좌 조회
-        :param contain_req: Remaining-Req 포함여부
-        :return: 내가 보유한 자산 리스트
-        [contain_req == True 일 경우 Remaining-Req가 포함]
+        Args:
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or list: tuple if contain_req else list
         """
         url = "https://api.upbit.com/v1/accounts"
         headers = await self._request_headers()
-        result, limits = await _send_get_request(url, headers=headers)
-        return (result, limits) if contain_req else result
+        body, remain = await _send_get_request(url, headers=headers)
+        return (body, remain) if contain_req else body
 
+    async def get_balance(self, ticker: str = "KRW", contain_req: bool = False) -> tuple or float:
+        """Check the balance of a specific coin/won 
 
-    async def get_balance(self, ticker: str = "KRW", contain_req: bool = False):
-        """
-        특정 코인/원화의 잔고를 조회하는 메소드
-        :param ticker: 화폐를 의미하는 영문 대문자 코드
-        :param contain_req: Remaining-Req 포함여부
-        :return: 주문가능 금액/수량 (주문 중 묶여있는 금액/수량 제외)
-        [contain_req == True 일 경우 Remaining-Req가 포함]
+        Args:
+            ticker (str, optional): Coin's ticker. Defaults to "KRW".
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or float: tuple if contain_req else float
         """
         ticker = (lambda x: x.split('-')[1] if '-' in x else x)(ticker)
-        balances, limits = await self.get_balances(contain_req=True)
-        balance = 0
-        for x in balances:
+        body, remain = await self.get_balances(contain_req=True)
+        for x in body:
             if x['currency'] == ticker:
                 balance = float(x['balance'])
-                break
-        return (balance, limits) if contain_req else balance
+                return (balance, remain) if contain_req else balance
 
+    async def get_balance_t(self, ticker: str = 'KRW', contain_req: bool = False) -> tuple or float:
+        """Check the balance of a specific coin/won(balance + locked)
 
-    async def get_balance_t(self, ticker: str = 'KRW', contain_req: bool = False):
-        """
-        특정 코인/원화의 잔고 조회(balance + locked)
-        :param ticker: 화폐를 의미하는 영문 대문자 코드
-        :param contain_req: Remaining-Req 포함여부
-        :return: 주문가능 금액/수량 (주문 중 묶여있는 금액/수량 포함)
-        [contain_req == True 일 경우 Remaining-Req가 포함]
+        Args:
+            ticker (str, optional): Coin's ticker. Defaults to 'KRW'.
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or float: tuple if contain_req else float
         """
         ticker = (lambda x: x.split('-')[1] if '-' in x else x)(ticker)
-        balances, limits = await self.get_balances(contain_req=True)
-        balance = 0
-        locked = 0
-        for x in balances:
+        body, remain = await self.get_balances(contain_req=True)
+        for x in body:
             if x['currency'] == ticker:
                 balance = float(x['balance'])
                 locked = float(x['locked'])
-                break
-        return (balance + locked, limits) if contain_req else (balance + locked)
+                return (balance + locked, remain) if contain_req else (balance + locked)
 
+    async def get_avg_buy_price(self, ticker: str = 'KRW', contain_req: bool = False) -> tuple or float:
+        """Average buying price of a specific coin/won 
 
-    async def get_avg_buy_price(self, ticker: str = 'KRW', contain_req: bool = False):
-        """
-        특정 코인/원화의 매수평균가 조회
-        :param ticker: 화폐를 의미하는 영문 대문자 코드
-        :param contain_req: Remaining-Req 포함여부
-        :return: 매수평균가
-        [contain_req == True 일 경우 Remaining-Req가 포함]
+        Args:
+            ticker (str, optional): Coin's ticker. Defaults to 'KRW'.
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or float: tuple if contain_req else float
         """
         ticker = (lambda x: x.split('-')[1] if '-' in x else x)(ticker)
-        balances, limits = await self.get_balances(contain_req=True)
-        avg_buy_price = 0
-        for x in balances:
+        body, remain = await self.get_balances(contain_req=True)
+        for x in body:
             if x['currency'] == ticker:
                 avg_buy_price = float(x['avg_buy_price'])
-                break
-        return (avg_buy_price, limits) if contain_req else avg_buy_price
+                return (avg_buy_price, remain) if contain_req else avg_buy_price
 
+    async def get_amount(self, ticker: str, contain_req: bool = False) -> tuple or float:
+        """The purchase amount of a specific coin/won 
 
-    async def get_amount(self, ticker: str, contain_req: bool = False):
-        """
-        특정 코인/원화의 매수금액 조회
-        :param ticker: 화폐를 의미하는 영문 대문자 코드 (ALL 입력시 총 매수금액 조회)
-        :param contain_req: Remaining-Req 포함여부
-        :return: 매수금액
-        [contain_req == True 일 경우 Remaining-Req가 포함]
+        Args:
+            ticker (str): Coin's ticker
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or float: tuple if contain_req else float
         """
         ticker = (lambda x: x.split('-')[1] if '-' in x else x)(ticker)
-        balances, limits = await self.get_balances(contain_req=True)
+        body, remain = await self.get_balances(contain_req=True)
         amount = 0
-        for x in balances:
+        for x in body:
             if x['currency'] == 'KRW':
                 continue
             avg_buy_price = float(x['avg_buy_price'])
@@ -159,36 +180,108 @@ class Upbit:
             elif x['currency'] == ticker:
                 amount = avg_buy_price * (balance + locked)
                 break
-        return (amount, limits) if contain_req else amount
+        return (amount, remain) if contain_req else amount
 
+    async def get_chance(self, ticker: str, contain_req: bool = False) -> tuple or list:
+        """Check the availability information for each market
 
-    async def get_chance(self, ticker: str, contain_req: bool = False):
-        """
-        마켓별 주문 가능 정보를 확인.
-        :param ticker:
-        :param contain_req: Remaining-Req 포함여부
-        :return: 마켓별 주문 가능 정보를 확인
-        [contain_req == True 일 경우 Remaining-Req가 포함]
+        Args:
+            ticker (str): Coin's ticker.
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or list: tuple if contain_req else list
         """
         url = "https://api.upbit.com/v1/orders/chance"
         data = {"market": ticker}
         headers = await self._request_headers(data)
-        result, limits = await _send_get_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        body, remain = await _send_get_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
+    async def get_order(self,
+                        ticker_or_uuid: str,
+                        state: str = 'wait',
+                        kind: str = 'normal',
+                        contain_req: bool = False) -> tuple or list:
+        """Get order information list
+
+        Args:
+            ticker_or_uuid (str): Coin's ticker or UUID
+            state (str, optional): Order status (wait, done, cancel). Defaults to 'wait'.
+            kind (str, optional): Order type (normal, watch). Defaults to 'normal'.
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or list: tuple if contain_req else list
+        """
+        url = "https://api.upbit.com/v1/orders"
+        # TODO : states, identifiers 관련 기능 추가 필요
+        p = re.compile(r"^\w+-\w+-\w+-\w+-\w+$")
+        # 정확히는 입력을 대문자로 변환 후 다음 정규식을 적용해야 함
+        # - r"^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$"
+        if len(p.findall(ticker_or_uuid)) > 0:
+            data = {'uuid': ticker_or_uuid}
+        else:
+            data = {'market': ticker_or_uuid,
+                    'state': state,
+                    'kind': kind,
+                    'order_by': 'desc'}
+        headers = await self._request_headers(data)
+        body, remain = await _send_get_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
+
+    async def get_individual_order(self,
+                                   uuid: str,
+                                   contain_req: bool = False) -> tuple or dict:
+        """Get individual order information
+
+        Args:
+            uuid (str): Order UUID
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else dict
+        """
+        # TODO : states, uuids, identifiers 관련 기능 추가 필요
+        url = "https://api.upbit.com/v1/order"
+        data = {'uuid': uuid}
+        headers = await self._request_headers(data)
+        body, remain = await _send_get_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
+
+    async def cancel_order(self,
+                           uuid: str,
+                           contain_req: bool = False) -> tuple or dict:
+        """Order cancellation
+
+        Args:
+            uuid (str): UUID of the return value of the order function
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else list
+        """
+        url = "https://api.upbit.com/v1/order"
+        data = {"uuid": uuid}
+        headers = await self._request_headers(data)
+        body, remain = await _send_delete_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
     async def buy_limit_order(self,
                               ticker: str,
                               price: float,
                               volume: float,
-                              contain_req: bool = False):
-        """
-        지정가 매수
-        :param ticker: 마켓 티커
-        :param price: 주문 가격
-        :param volume: 주문 수량
-        :param contain_req: Remaining-Req 포함여부
-        :return:
+                              contain_req: bool = False) -> tuple or dict:
+        """Limitation buy order
+
+        Args:
+            ticker (str): Coin's ticker
+            price (float): The order price
+            volume (float): The order quantity
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else list
         """
         url = "https://api.upbit.com/v1/orders"
         data = {"market": ticker,
@@ -197,64 +290,47 @@ class Upbit:
                 "price": str(price),
                 "ord_type": "limit"}
         headers = await self._request_headers(data)
-        result, limits = await _send_post_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
-
+        body, remain = await _send_post_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
     async def buy_market_order(self,
                                ticker: str,
                                price: float,
-                               contain_req: bool = False):
-        """
-        시장가 매수
-        :param ticker: ticker for cryptocurrency
-        :param price: KRW
-        :param contain_req: Remaining-Req 포함여부
-        :return:
+                               contain_req: bool = False) -> tuple or dict:
+        """Market buy order
+
+        Args:
+            ticker (str): Coin's ticker
+            price (float): The order price
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else list
         """
         url = "https://api.upbit.com/v1/orders"
-        data = {"market": ticker,  # market ID
-                "side": "bid",  # buy
+        data = {"market": ticker,
+                "side": "bid",
                 "price": str(price),
                 "ord_type": "price"}
         headers = await self._request_headers(data)
-        result, limits = await _send_post_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
-
-
-    async def sell_market_order(self,
-                                ticker: str,
-                                volume: float,
-                                contain_req: bool = False):
-        """
-        시장가 매도 메서드
-        :param ticker: 가상화폐 티커
-        :param volume: 수량
-        :param contain_req: Remaining-Req 포함여부
-        :return:
-        """
-        url = "https://api.upbit.com/v1/orders"
-        data = {"market": ticker,  # ticker
-                "side": "ask",  # sell
-                "volume": str(volume),
-                "ord_type": "market"}
-        headers = await self._request_headers(data)
-        result, limits = await _send_post_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
-
+        body, remain = await _send_post_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
     async def sell_limit_order(self,
                                ticker: str,
                                price: float,
                                volume: float,
-                               contain_req: bool = False):
-        """
-        지정가 매도
-        :param ticker: 마켓 티커
-        :param price: 주문 가격
-        :param volume: 주문 수량
-        :param contain_req: Remaining-Req 포함여부
-        :return:
+                               contain_req: bool = False) -> tuple or dict:
+        """Limitation sell order
+
+        Args:
+            ticker (str): Coin's ticker
+            price (float): The order price
+            volume (float): The order quantity
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else list
         """
         url = "https://api.upbit.com/v1/orders"
         data = {"market": ticker,
@@ -263,73 +339,49 @@ class Upbit:
                 "price": str(price),
                 "ord_type": "limit"}
         headers = await self._request_headers(data)
-        result, limits = await _send_post_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        body, remain = await _send_post_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
+    async def sell_market_order(self,
+                                ticker: str,
+                                volume: float,
+                                contain_req: bool = False) -> tuple or dict:
+        """Market sell order
 
-    async def cancel_order(self,
-                           uuid: str,
-                           contain_req: bool = False):
-        """
-        주문 취소
-        :param uuid: 주문 함수의 리턴 값중 uuid
-        :param contain_req: Remaining-Req 포함여부
-        :return:
-        """
-        url = "https://api.upbit.com/v1/order"
-        data = {"uuid": uuid}
-        headers = await self._request_headers(data)
-        result, limits = await _send_delete_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        Args:
+            ticker (str): Coin's ticker
+            volume (float): The order quantity
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
 
-
-    async def get_order(self,
-                        ticker_or_uuid: str,
-                        state: str = 'wait',
-                        kind: str = 'normal',
-                        contain_req: bool = False):
+        Returns:
+            tuple or dict: tuple if contain_req else list
         """
-        주문 리스트 조회
-        :param ticker: market
-        :param state: 주문 상태(wait, done, cancel)
-        :param kind: 주문 유형(normal, watch)
-        :param contain_req: Remaining-Req 포함여부
-        :return:
-        """
-        # TODO : states, identifiers 관련 기능 추가 필요
-        p = re.compile(r"^\w+-\w+-\w+-\w+-\w+$")
-        # 정확히는 입력을 대문자로 변환 후 다음 정규식을 적용해야 함
-        # - r"^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$"
-        is_uuid = len(p.findall(ticker_or_uuid)) > 0
         url = "https://api.upbit.com/v1/orders"
-        if is_uuid:
-            data = {'uuid': ticker_or_uuid}
-        else:
-            data = {'market': ticker_or_uuid,
-                    'state': state,
-                    'kind': kind,
-                    'order_by': 'desc'}
+        data = {"market": ticker,
+                "side": "ask",
+                "volume": str(volume),
+                "ord_type": "market"}
         headers = await self._request_headers(data)
-        result, limits = await _send_get_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        body, remain = await _send_post_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
+    async def get_individual_withdraw_order(self, uuid: str, currency: str, contain_req: bool = False) -> tuple or dict:
+        """Cash withdrawal
 
-    async def get_individual_order(self,
-                                   uuid: str,
-                                   contain_req: bool = False):
+        Args:
+            uuid (str): Withdrawal UUID
+            currency (str): Currency code
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else dict
         """
-        주문 리스트 조회
-        :param uuid: 주문 id
-        :param contain_req: Remaining-Req 포함여부
-        :return:
-        """
-        # TODO : states, uuids, identifiers 관련 기능 추가 필요
-        url = "https://api.upbit.com/v1/order"
-        data = {'uuid': uuid}
+        url = "https://api.upbit.com/v1/withdraw"
+        data = {"uuid": uuid,
+                "currency": currency}
         headers = await self._request_headers(data)
-        result, limits = await _send_get_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
-
+        body, remain = await _send_get_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
     async def withdraw_coin(self,
                             currency: float,
@@ -337,16 +389,19 @@ class Upbit:
                             address: str,
                             secondary_address: str = 'None',
                             transaction_type: str = 'default',
-                            contain_req: bool = False):
-        """
-        코인 출금
-        :param currency: Currency symbol
-        :param amount: 주문 가격
-        :param address: 출금 지갑 주소
-        :param secondary_address: 2차 출금주소 (필요한 코인에 한해서)
-        :param transaction_type: 출금 유형
-        :param contain_req: Remaining-Req 포함여부
-        :return:
+                            contain_req: bool = False) -> tuple or dict:
+        """Coin withdrawal
+
+        Args:
+            currency (float): Currency code
+            amount (float): Order price
+            address (str): Withdrawal wallet address
+            secondary_address (str, optional): Secondary withdrawal address (only for required coins). Defaults to 'None'.
+            transaction_type (str, optional): Withdrawal type. Defaults to 'default'.
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else dict
         """
         url = "https://api.upbit.com/v1/withdraws/coin"
         data = {"currency": currency,
@@ -355,36 +410,49 @@ class Upbit:
                 "secondary_address": secondary_address,
                 "transaction_type": transaction_type}
         headers = await self._request_headers(data)
-        result, limits = await _send_post_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        body, remain = await _send_post_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
+    async def withdraw_cash(self, amount: str, contain_req: bool = False) -> tuple or dict:
+        """Cash withdrawal
 
-    async def withdraw_cash(self, amount: str, contain_req: bool = False):
-        """
-        현금 출금
-        :param amount: 출금 액수
-        :param contain_req: Remaining-Req 포함여부
-        :return:
+        Args:
+            amount (str): Withdrawal amount
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else dict
         """
         url = "https://api.upbit.com/v1/withdraws/krw"
         data = {"amount": amount}
         headers = await self._request_headers(data)
-        result, limits = await _send_post_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        body, remain = await _send_post_request(url, headers=headers, data=data)
+        return (body, remain) if contain_req else body
 
+    async def get_deposit_withdraw_status(self, contain_req: bool = False) -> tuple or dict:
+        """Deposit and withdrawal status 
 
-    async def get_individual_withdraw_order(self, uuid: str, currency: str, contain_req: bool = False):
+        Args:
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else dict
         """
-        현금 출금
-        :param uuid: 출금 UUID
-        :param txid: 출금 TXID
-        :param currency: Currency 코드
-        :param contain_req: Remaining-Req 포함여부
-        :return:
+        url = "https://api.upbit.com/v1/status/wallet"
+        headers = await self._request_headers()
+        body, remain = await _send_get_request(url, headers=headers)
+        return (body, remain) if contain_req else body
+
+    async def get_api_key_list(self, contain_req: bool = False) -> tuple or dict:
+        """API key list lookup 
+
+        Args:
+            contain_req (bool, optional): Contain send request limitation information to return. Defaults to False.
+
+        Returns:
+            tuple or dict: tuple if contain_req else dict
         """
-        url = "https://api.upbit.com/v1/withdraw"
-        data = {"uuid": uuid,
-                "currency": currency}
-        headers = await self._request_headers(data)
-        result, limits = await _send_get_request(url, headers=headers, data=data)
-        return (result, limits) if contain_req else result
+        url = "https://api.upbit.com/v1/api_keys"
+        headers = await self._request_headers()
+        body, remain = await _send_get_request(url, headers=headers)
+        return (body, remain) if contain_req else body

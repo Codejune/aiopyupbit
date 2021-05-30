@@ -1,5 +1,8 @@
 # !/usr/bin/python
 # -*- coding: utf-8 -*-ß
+import json
+
+
 class UpbitError(Exception):
     def __str__(self):
         return "Upbit Base Error"
@@ -35,7 +38,7 @@ class UnderMinTotalBid(UpbitError):
         return "주문 요청 금액이 최소 주문 금액 미만입니다."
 
 
-class WidthdrawAddressNotRegisterd(UpbitError):
+class WidthdrawAddressNotRegistered(UpbitError):
     def __str__(self):
         return "허용되지 않은 출금 주소입니다."
 
@@ -52,7 +55,7 @@ class InvalidQueryPayload(UpbitError):
 
 class JwtVerification(UpbitError):
     def __str__(self):
-        return "JWT 헤더 검증에 실패했습니다."
+        return "JWT 토큰 검증에 실패했습니다."
 
 
 class ExpiredAccessKey(UpbitError):
@@ -65,7 +68,7 @@ class NonceUsed(UpbitError):
         return "이미 요청한 nonce값이 다시 사용되었습니다."
 
 
-class NoAutorizationIP(UpbitError):
+class NoAuthorizationIP(UpbitError):
     def __str__(self):
         return "허용되지 않은 IP 주소입니다."
 
@@ -78,3 +81,36 @@ class OutOfScope(UpbitError):
 class TooManyRequests(UpbitError):
     def __str__(self):
         return "요청 수 제한을 초과했습니다."
+
+
+class RemainingReqParsingError(UpbitError):
+    def __str__(self):
+        return "요청 수 제한 파싱에 실패했습니다."
+
+
+class InValidAccessKey(UpbitError):
+    def __str__(self):
+        return "잘못된 엑세스 키입니다."
+
+
+async def raise_error(response):
+    response_json = await response.json()
+    code = response.status
+    name = response_json["error"]["name"]
+    message = response_json["error"]["message"]
+    
+    print(f'CODE: {code}\n'
+          f'Name: {name}\n'
+          f'Message: {message}')
+
+    if code == 429:
+        raise TooManyRequests()
+    elif code == 401:
+        if name == "jwt_verification":
+            raise JwtVerification()
+        elif name == "invalid_access_key":
+            raise InValidAccessKey()
+        elif name == "no_authorization_i_p":
+            raise NoAuthorizationIP()
+    else:
+        raise UpbitError()

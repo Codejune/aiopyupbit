@@ -3,124 +3,82 @@
 import re
 import aiohttp
 if __name__ == "__main__":
-    from errors import TooManyRequests, UpbitError
+    from errors import (raise_error, RemainingReqParsingError)
 else:
-    from .errors import TooManyRequests, UpbitError
-
-getframe_expr = 'sys._getframe({}).f_code.co_name'
+    from .errors import (raise_error, RemainingReqParsingError)
 
 
-async def _parse_remaining_req(remaining_req):
-    """
+async def is_request_success(code: int):
+    if 200 <= code < 400:
+        return True
+    else:
+        return False
 
-    :param remaining_req:
-    :return:
+
+async def _parse_remaining_req(remaining_req: str):
+    """Parse the request limit data of the API
+
+    Args:
+        remaining_req (str): "group=market; min=573; sec=9" 
+
+    Returns:
+        dict: {'group': 'market', 'min': 573, 'sec': 2}
     """
     try:
-        p = re.compile("group=([a-z]+); min=([0-9]+); sec=([0-9]+)")
+        p = re.compile(r"group=([a-z\-]+); min=([0-9]+); sec=([0-9]+)")
         m = p.search(remaining_req)
-        return m.group(1), int(m.group(2)), int(m.group(3))
+        return {'group': m.group(1), 'min': int(m.group(2)), 'sec': int(m.group(3))}
     except:
-        return None, None, None
+        raise RemainingReqParsingError()
 
 
-async def _call_public_api(url, **kwargs):
-    """
+async def _call_public_api(url: str, **kwargs):
+    """Call get type api
 
-    :param url:
-    :param kwargs:
-    :return:
+    Args:
+        url (str): REST API url
+
+    Returns:
+        tuple: (data, req_limit_info) 
     """
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=kwargs) as response:
-
-            # TODO Raise error prototype
-            if response.status == 429:
-                raise TooManyRequests()
-
-            remaining_req_dict = {}
-            remaining_req = response.headers.get('Remaining-Req')
-            if remaining_req != None:
-                group, min, sec = await _parse_remaining_req(remaining_req)
-                remaining_req_dict['group'] = group
-                remaining_req_dict['min'] = min
-                remaining_req_dict['sec'] = sec
-            contents = await response.json()
-            return contents, remaining_req_dict
+            if await is_request_success(response.status):
+                remain = await _parse_remaining_req(response.headers.get('Remaining-Req'))
+                body = await response.json()
+                return body, remain
+            else:
+                await raise_error(response)
 
 
 async def _send_post_request(url, headers=None, data=None):
-    """
-
-    :param url:
-    :param headers:
-    :param data:
-    :return:
-    """
     async with aiohttp.ClientSession() as session:
         async with session.post(url, headers=headers, data=data) as response:
-
-            # TODO Raise error prototype
-            if response.status == 429:
-                raise TooManyRequests()
-
-            remaining_req_dict = {}
-            remaining_req = response.headers.get('Remaining-Req')
-            if remaining_req is not None:
-                group, min, sec = await _parse_remaining_req(remaining_req)
-                remaining_req_dict['group'] = group
-                remaining_req_dict['min'] = min
-                remaining_req_dict['sec'] = sec
-            contents = await response.json()
-            return contents, remaining_req_dict
+            if await is_request_success(response.status):
+                remain = await _parse_remaining_req(response.headers.get('Remaining-Req'))
+                body = await response.json()
+                return body, remain
+            else:
+                await raise_error(response)
 
 
 async def _send_get_request(url, headers=None, data=None):
-    """
-
-    :param url:
-    :param headers:
-    :return:
-    """
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, data=data) as response:
-
-            # TODO Raise error prototype
-            if response.status == 429:
-                raise TooManyRequests()
-
-            remaining_req_dict = {}
-            remaining_req = response.headers.get('Remaining-Req')
-            if remaining_req is not None:
-                group, min, sec = await _parse_remaining_req(remaining_req)
-                remaining_req_dict['group'] = group
-                remaining_req_dict['min'] = min
-                remaining_req_dict['sec'] = sec
-            contents = await response.json()
-            return contents, remaining_req_dict
+            if await is_request_success(response.status):
+                remain = await _parse_remaining_req(response.headers.get('Remaining-Req'))
+                body = await response.json()
+                return body, remain
+            else:
+                await raise_error(response)
 
 
 async def _send_delete_request(url, headers=None, data=None):
-    """
-
-    :param url:
-    :param headers:
-    :param data:
-    :return:
-    """
     async with aiohttp.ClientSession() as session:
         async with session.delete(url, headers=headers, data=data) as response:
-
-            # TODO Raise error prototype
-            if response.status == 429:
-                raise TooManyRequests()
-
-            remaining_req_dict = {}
-            remaining_req = response.headers.get('Remaining-Req')
-            if remaining_req is not None:
-                group, min, sec = await _parse_remaining_req(remaining_req)
-                remaining_req_dict['group'] = group
-                remaining_req_dict['min'] = min
-                remaining_req_dict['sec'] = sec
-            contents = await response.json()
-            return contents, remaining_req_dict
+            if await is_request_success(response.status):
+                remain = await _parse_remaining_req(response.headers.get('Remaining-Req'))
+                body = await response.json()
+                return body, remain
+            else:
+                await raise_error(response)
